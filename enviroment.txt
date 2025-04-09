@@ -1,0 +1,1 @@
+BOOTSTRAPSERVERS=localhost:9092;TOPIC=http_log;CH-PROXY=jdbc:clickhouse://localhost:8124;CH-USERNAME=default;PASSWORD=
