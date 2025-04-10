@@ -24,18 +24,6 @@ public class HttpLogDTO {
         this.url = url;
     }
 
-    public void printData() {
-        System.out.println("Time stamp: " + getTimestampEpochMilli());
-        System.out.println("Resource ID: " + getResourceId());
-        System.out.println("Bytes sent: " + getBytesSent());
-        System.out.println("Request time: " + getRequestTimeMilli());
-        System.out.println("Response status: " + getResponseStatus());
-        System.out.println("Cache Status: " + getCacheStatus());
-        System.out.println("Method: " + getMethod());
-        System.out.println("Remote address (anonymized): " + anonymize(getRemoteAddr()));
-        System.out.println("URL: " + getUrl());
-    }
-
     private String anonymize(String remoteAddr) {
         if (remoteAddr == null || remoteAddr.isEmpty()) {
             return null;

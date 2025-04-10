@@ -35,7 +35,7 @@ public class KafkaListener {
         dtoList = new ArrayList<>();
 
         this.dataSender = new DataSender();
-        dataSender.connect();
+        dataSender.connectToProxy();
     }
 
     public void listen() {
@@ -58,7 +58,6 @@ public class KafkaListener {
                     HttpLog.HttpLogRecord.Reader log = message.getRoot(HttpLog.HttpLogRecord.factory);
                     HttpLogDTO logDTO = new HttpLogDTO(log.getTimestampEpochMilli(),log.getResourceId(), log.getBytesSent(), log.getRequestTimeMilli(), log.getResponseStatus(), log.getCacheStatus().toString(), log.getMethod().toString(), log.getRemoteAddr().toString(), log.getUrl().toString());
 
-                    logDTO.printData();
                     if(logDTO.getRemoteAddr() != null && logDTO.getTimestampEpochMilli() > 0 && logDTO.getBytesSent() > 0 && logDTO.getResourceId() > 0 && logDTO.getRequestTimeMilli() > 0) {
                         dtoList.add(logDTO);
                     }else{
