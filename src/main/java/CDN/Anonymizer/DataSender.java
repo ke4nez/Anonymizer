@@ -20,14 +20,13 @@ public class DataSender {
 
     public DataSender(){}
     public void connect() {
-        try (Connection connection = DriverManager.getConnection(url, user, password)) {
+        try {
             this.connection = DriverManager.getConnection(url, user, password);
             lastProxyInteractionTime = System.currentTimeMillis();
             logger.info("CONNECTED TO CLICKHOUSE!");
 
         } catch (SQLException e) {
-            logger.error("UNABLE TO CONNECT TO: " + url + "WITH USER: " + user);
-            e.printStackTrace();
+            logger.error("Unable to connect to: " + url + "with user: " + user + e.getMessage());
         }
     }
 
@@ -38,16 +37,8 @@ public class DataSender {
             lastProxyInteractionTime = System.currentTimeMillis();
             logger.info("CONNECTED TO CH-PROXY!");
 
-            try {
-                TimeUnit.SECONDS.sleep(62);
-                getAllAggregatedLogs();
-            } catch (InterruptedException ie) {
-                Thread.currentThread().interrupt();
-            }
-
         } catch (SQLException e) {
-            logger.error("UNABLE TO CONNECT TO CH-PROXY ON: " + url + " WITH USER: " + user);
-            e.printStackTrace();
+            logger.error("Unable to connect to ch-proxy on: " + url + " with user: " + user + e.getMessage());
             try {
                 TimeUnit.SECONDS.sleep(62);
                 connectToProxy();
@@ -74,10 +65,9 @@ public class DataSender {
         try (Statement stmt = connection.createStatement()) {
             stmt.executeUpdate(createTableSQL);
             lastProxyInteractionTime = System.currentTimeMillis();
-            logger.debug("LOG RECORDS TABLES CREATED OR ALREADY EXISTS.");
+            logger.debug("Log records tables created or already exists.");
         } catch (SQLException e) {
-            logger.error("CANT CREATE TABLES FOR LOGS.");
-            e.printStackTrace();
+            logger.error("Cant create tables for logs." + e.getMessage());
         }
     }
     public void createTableForLogsAggregation(Connection connection) {
@@ -94,10 +84,9 @@ public class DataSender {
         try (Statement stmt = connection.createStatement()) {
             stmt.executeUpdate(createTableSQL);
             lastProxyInteractionTime = System.currentTimeMillis();
-            logger.debug("LOG RECORDS AGGREGATION TABLE CREATED OR ALREADY EXISTS.");
+            logger.debug("Log records aggregation table created or already exists.");
         } catch (SQLException e) {
-            logger.error("CANNOT CREATE AGGREGATION TABLE FOR LOGS. " + e.getMessage());
-            e.printStackTrace();
+            logger.error("Cannot create aggregation table for logs. " + e.getMessage());
         }
     }
     public void refreshAggregatedTable() {
@@ -123,7 +112,7 @@ public class DataSender {
         }
     }
     public List<HttpLogDTO> transferData(List<HttpLogDTO> dtoList) {
-        logger.info("ADDING DTO LIST WITH: " + dtoList.size() + " RECORDS");
+        logger.info("adding dto list with: " + dtoList.size() + " records");
         if (dtoList.isEmpty()) {
             lastProxyInteractionTime = System.currentTimeMillis();
             return dtoList;
@@ -167,7 +156,6 @@ public class DataSender {
 
         } catch (SQLException e) {
             logger.error("Batch insert failed: " + e.getMessage());
-            e.printStackTrace();
             return dtoList;
         }
     }
@@ -177,10 +165,9 @@ public class DataSender {
         try (Statement stmt = connection.createStatement()) {
             stmt.executeUpdate(dropTableSQL);
             lastProxyInteractionTime = System.currentTimeMillis();
-            logger.debug("TABLE '" + tableName + "' DROPPED OR DOS NOT EXISTS.");
+            logger.debug("Table '" + tableName + "' dropped or dos not exists.");
         } catch (SQLException e) {
-            logger.error("ERROR ON DROPPING TABLE WITH NAME:  '" + tableName + "'");
-            e.printStackTrace();
+            logger.error("error on dropping table with name:  '" + tableName + "'" + e.getMessage());
         }
     }
     public void getAllLogs() {
@@ -223,8 +210,7 @@ public class DataSender {
             System.out.println("----------------------------------------------------------------------------------------------------------------------------------");
             System.out.println("Rows in log table: " + counter);
         } catch (SQLException e) {
-            logger.error("CANT LOAD LOGS FROM DATABASE: " + e.getMessage());
-            e.printStackTrace();
+            logger.error("Cant load logs from database: " + e.getMessage());
         }
     }
     public void getAllAggregatedLogs() {

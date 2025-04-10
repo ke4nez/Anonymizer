@@ -39,7 +39,7 @@ public class KafkaListener {
     }
 
     public void listen() {
-        logger.info("START LISTENING");
+        logger.info("Start listening");
 
         while (true) {
             try {
@@ -59,10 +59,10 @@ public class KafkaListener {
                     HttpLogDTO logDTO = new HttpLogDTO(log.getTimestampEpochMilli(),log.getResourceId(), log.getBytesSent(), log.getRequestTimeMilli(), log.getResponseStatus(), log.getCacheStatus().toString(), log.getMethod().toString(), log.getRemoteAddr().toString(), log.getUrl().toString());
 
                     logDTO.printData();
-                    if(logDTO.getTimestampEpochMilli() > 0 && logDTO.getBytesSent() > 0 && logDTO.getResourceId() > 0 && logDTO.getRequestTimeMilli() > 0) {
+                    if(logDTO.getRemoteAddr() != null && logDTO.getTimestampEpochMilli() > 0 && logDTO.getBytesSent() > 0 && logDTO.getResourceId() > 0 && logDTO.getRequestTimeMilli() > 0) {
                         dtoList.add(logDTO);
                     }else{
-                        logger.error("TRYING TO ADD LOG RECORD WITH VARIABLE OVERFLOW. THIS RECORD WILL BE IGNORED");
+                        logger.error("Trying to add log record with variable overflow or/and invalid remote address. this record will be ignored");
                     }
                 } catch (Exception e) {
                     logger.error("Failed to deserialize Cap’n Proto message: " + e.getMessage());
@@ -73,7 +73,7 @@ public class KafkaListener {
                 consumer.commitSync();
                 logger.debug("Committed offsets after adding logs to dtoList.");
             } catch (CommitFailedException e) {
-                logger.error("OFFSET COMMIT FAILED: " + e.getMessage());
+                logger.error("Offset commit failed: " + e.getMessage());
             }
 
             if(dataSender.getProxyDuration() > 60 && dataSender.getOptimizeDuration() < 180){

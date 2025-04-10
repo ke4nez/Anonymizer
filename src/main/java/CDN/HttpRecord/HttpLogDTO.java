@@ -38,7 +38,7 @@ public class HttpLogDTO {
 
     private String anonymize(String remoteAddr) {
         if (remoteAddr == null || remoteAddr.isEmpty()) {
-            return "unknown";
+            return null;
         }
 
         String[] parts = remoteAddr.split("\\.");
@@ -47,7 +47,7 @@ public class HttpLogDTO {
             return String.join(".", parts);
         }
 
-        return "Incorrect address format";
+        return null;
     }
 
     public long getTimestampEpochMilli() {
