@@ -2,10 +2,7 @@ package CDN.Anonymizer;
 
 import CDN.HttpRecord.HttpLog;
 import CDN.HttpRecord.HttpLogDTO;
-import org.apache.kafka.clients.consumer.ConsumerConfig;
-import org.apache.kafka.clients.consumer.ConsumerRecord;
-import org.apache.kafka.clients.consumer.ConsumerRecords;
-import org.apache.kafka.clients.consumer.KafkaConsumer;
+import org.apache.kafka.clients.consumer.*;
 import org.capnproto.MessageReader;
 import org.capnproto.Serialize;
 import org.slf4j.Logger;
@@ -22,6 +19,7 @@ public class KafkaListener {
     private final KafkaConsumer<String, byte[]> consumer;
     private final  DataSender dataSender;
     private List<HttpLogDTO> dtoList;
+    private long kafkaPullDelay = Long.parseLong(System.getenv("KAFKA-POLL-DELAY-MS"));
 
     public KafkaListener(String bootstrapServers, String topic) {
         Properties props = new Properties();
@@ -29,6 +27,7 @@ public class KafkaListener {
         props.put(ConsumerConfig.GROUP_ID_CONFIG, "capnp-listener-group");
         props.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, "org.apache.kafka.common.serialization.StringDeserializer");
         props.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, "org.apache.kafka.common.serialization.ByteArrayDeserializer");
+        props.put(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, "false");
 
         consumer = new KafkaConsumer<>(props);
         consumer.subscribe(Collections.singletonList(topic));
@@ -36,13 +35,20 @@ public class KafkaListener {
         dtoList = new ArrayList<>();
 
         this.dataSender = new DataSender();
-        dataSender.connectToProxy();
+        dataSender.connect();
     }
 
     public void listen() {
         logger.info("START LISTENING");
 
         while (true) {
+            try {
+                Thread.sleep(kafkaPullDelay);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                logger.error("Listener interrupted during sleep.");
+                break;
+            }
             ConsumerRecords<String, byte[]> records = consumer.poll(java.time.Duration.ofMillis(100));
 
             for (ConsumerRecord<String, byte[]> record : records) {
@@ -53,20 +59,29 @@ public class KafkaListener {
                     HttpLogDTO logDTO = new HttpLogDTO(log.getTimestampEpochMilli(),log.getResourceId(), log.getBytesSent(), log.getRequestTimeMilli(), log.getResponseStatus(), log.getCacheStatus().toString(), log.getMethod().toString(), log.getRemoteAddr().toString(), log.getUrl().toString());
 
                     logDTO.printData();
-                    if(logDTO.getTimestampEpochMilli() > 0) {
+                    if(logDTO.getTimestampEpochMilli() > 0 && logDTO.getBytesSent() > 0 && logDTO.getResourceId() > 0 && logDTO.getRequestTimeMilli() > 0) {
                         dtoList.add(logDTO);
                     }else{
-                        logger.error("TRYING TO ADD LOG RECORD WITH TIMESTAMP OVERFLOW. THIS RECORD WILL BE IGNORED");
+                        logger.error("TRYING TO ADD LOG RECORD WITH VARIABLE OVERFLOW. THIS RECORD WILL BE IGNORED");
                     }
                 } catch (Exception e) {
                     logger.error("Failed to deserialize Cap’n Proto message: " + e.getMessage());
-                    e.printStackTrace();
                 }
             }
 
-            if(dataSender.getDuration() > 60 ){
-                logger.info("ADDING DTO LIST WITH: " + dtoList.size() + " RECORDS");
+            try {
+                consumer.commitSync();
+                logger.debug("Committed offsets after adding logs to dtoList.");
+            } catch (CommitFailedException e) {
+                logger.error("OFFSET COMMIT FAILED: " + e.getMessage());
+            }
+
+            if(dataSender.getProxyDuration() > 60 && dataSender.getOptimizeDuration() < 180){
                  dtoList = dataSender.transferData(dtoList);
+            }
+
+            if(dataSender.getProxyDuration() > 60 && dataSender.getOptimizeDuration() > 180){
+                dataSender.refreshAggregatedTable();
             }
         }
     }

@@ -15,31 +15,15 @@ public class DataSender {
     String user = System.getenv("CH-USERNAME");
     String password = System.getenv("PASSWORD");
     Connection connection;
-    private long lastInteractionTime;
+    private long lastProxyInteractionTime;
+    private long lastAggLogsUpdateTime = System.currentTimeMillis();
 
     public DataSender(){}
     public void connect() {
         try (Connection connection = DriverManager.getConnection(url, user, password)) {
             this.connection = DriverManager.getConnection(url, user, password);
-            lastInteractionTime = System.currentTimeMillis();
+            lastProxyInteractionTime = System.currentTimeMillis();
             logger.info("CONNECTED TO CLICKHOUSE!");
-
-           // createTable(connection);
-           // checkTableExists(connection);
-           // addSampleData(connection);
-          //  getSampleData(connection);
-
-             //dropTable(connection,"http_log");
-           //  dropTable(connection,"http_log_agg");
-            //  dropTable(connection,"http_log_mv");
-
-          //   createTableForLogs(connection);
-          //   createTableForLogsAggregation(connection);
-           //  createLogMaterializedView(connection);
-
-           getAllLogs(connection);
-           getAllAggregatedLogs(connection);
-
 
         } catch (SQLException e) {
             logger.error("UNABLE TO CONNECT TO: " + url + "WITH USER: " + user);
@@ -51,17 +35,12 @@ public class DataSender {
         try {
             String fullUrl = String.format("%s?user=%s&password=%s", proxyUrl, user, password);
             this.connection = DriverManager.getConnection(fullUrl);
-            lastInteractionTime = System.currentTimeMillis();
+            lastProxyInteractionTime = System.currentTimeMillis();
             logger.info("CONNECTED TO CH-PROXY!");
+
             try {
                 TimeUnit.SECONDS.sleep(62);
-                getAllLogs(connection);
-            } catch (InterruptedException ie) {
-                Thread.currentThread().interrupt();
-            }
-            try {
-                TimeUnit.SECONDS.sleep(62);
-                getAllAggregatedLogs(connection);
+                getAllAggregatedLogs();
             } catch (InterruptedException ie) {
                 Thread.currentThread().interrupt();
             }
@@ -77,7 +56,7 @@ public class DataSender {
             }
         }
     }
-    public void createTableForLogs(Connection connection) {
+    public void createTableForLogs() {
         String createTableSQL =
                 "CREATE TABLE IF NOT EXISTS http_log ("
                 + "timestamp DateTime, "
@@ -94,7 +73,7 @@ public class DataSender {
 
         try (Statement stmt = connection.createStatement()) {
             stmt.executeUpdate(createTableSQL);
-            lastInteractionTime = System.currentTimeMillis();
+            lastProxyInteractionTime = System.currentTimeMillis();
             logger.debug("LOG RECORDS TABLES CREATED OR ALREADY EXISTS.");
         } catch (SQLException e) {
             logger.error("CANT CREATE TABLES FOR LOGS.");
@@ -103,51 +82,50 @@ public class DataSender {
     }
     public void createTableForLogsAggregation(Connection connection) {
         String createTableSQL = "CREATE TABLE IF NOT EXISTS http_log_agg ("
-                        + "resource_id UInt64, "
-                        + "response_status UInt16, "
-                        + "cache_status LowCardinality(String), "
-                        + "remote_addr String, "
-                        + "total_bytes_sent UInt64, "
-                        + "request_count UInt64, "
-                        + "last_refresh_time DateTime DEFAULT now()) "
-                        + "ENGINE = AggregatingMergeTree() "
-                        + "ORDER BY (resource_id, response_status, cache_status, remote_addr)";
+                + "resource_id UInt64, "
+                + "response_status UInt16, "
+                + "cache_status LowCardinality(String), "
+                + "remote_addr String, "
+                + "total_bytes_sent UInt64, "
+                + "request_count UInt64) "
+                + "ENGINE = ReplacingMergeTree(total_bytes_sent) "
+                + "ORDER BY (resource_id, response_status, cache_status, remote_addr)";
 
         try (Statement stmt = connection.createStatement()) {
             stmt.executeUpdate(createTableSQL);
-            lastInteractionTime = System.currentTimeMillis();
-            logger.debug("LOG RECORDS TABLES CREATED OR ALREADY EXISTS.");
+            lastProxyInteractionTime = System.currentTimeMillis();
+            logger.debug("LOG RECORDS AGGREGATION TABLE CREATED OR ALREADY EXISTS.");
         } catch (SQLException e) {
-            logger.error("CANT CREATE TABLES FOR LOGS.");
+            logger.error("CANNOT CREATE AGGREGATION TABLE FOR LOGS. " + e.getMessage());
             e.printStackTrace();
         }
     }
-    public void createLogMaterializedView(Connection connection) {
-        String createMVSQL =
-                "CREATE MATERIALIZED VIEW IF NOT EXISTS http_log_mv "
-                        + "TO http_log_agg "
-                        + "AS SELECT "
-                        + "    resource_id, "
-                        + "    response_status, "
-                        + "    cache_status, "
-                        + "    remote_addr, "
-                        + "    sum(bytes_sent) AS total_bytes_sent, "
-                        + "    count() AS request_count, "
-                        + "    now() AS last_refresh_time "
+    public void refreshAggregatedTable() {
+        String insertDataSQL =
+                "INSERT INTO http_log_agg "
+                        + "SELECT "
+                        + "  resource_id, "
+                        + "  response_status, "
+                        + "  cache_status, "
+                        + "  remote_addr, "
+                        + "  sum(bytes_sent) AS total_bytes_sent, "
+                        + "  count() AS request_count "
                         + "FROM http_log "
                         + "GROUP BY resource_id, response_status, cache_status, remote_addr";
 
         try (Statement stmt = connection.createStatement()) {
-            stmt.executeUpdate(createMVSQL);
-            logger.debug("Materialized view linked to aggregation table");
+            stmt.executeUpdate(insertDataSQL);
+            logger.debug("Aggregated data inserted into 'http_log_agg' successfully.");
+
+            lastAggLogsUpdateTime = System.currentTimeMillis();
         } catch (SQLException e) {
-            logger.error("Error creating MV: " + e.getMessage());
-            e.printStackTrace();
+            logger.error("Failed to refresh aggregation table: " + e.getMessage());
         }
     }
     public List<HttpLogDTO> transferData(List<HttpLogDTO> dtoList) {
+        logger.info("ADDING DTO LIST WITH: " + dtoList.size() + " RECORDS");
         if (dtoList.isEmpty()) {
-            lastInteractionTime = System.currentTimeMillis();
+            lastProxyInteractionTime = System.currentTimeMillis();
             return dtoList;
         }
 
@@ -171,7 +149,7 @@ public class DataSender {
             }
 
             int[] result = stmt.executeBatch();
-            lastInteractionTime = System.currentTimeMillis();
+            lastProxyInteractionTime = System.currentTimeMillis();
             boolean isCorrect = true;
             for(int qresult : result){
                 if (qresult < 0) {
@@ -193,21 +171,22 @@ public class DataSender {
             return dtoList;
         }
     }
-    public void dropTable(Connection connection, String tableName) {
+    public void dropTable(String tableName) {
         String dropTableSQL = "DROP TABLE IF EXISTS " + tableName;
 
         try (Statement stmt = connection.createStatement()) {
             stmt.executeUpdate(dropTableSQL);
-            lastInteractionTime = System.currentTimeMillis();
+            lastProxyInteractionTime = System.currentTimeMillis();
             logger.debug("TABLE '" + tableName + "' DROPPED OR DOS NOT EXISTS.");
         } catch (SQLException e) {
             logger.error("ERROR ON DROPPING TABLE WITH NAME:  '" + tableName + "'");
             e.printStackTrace();
         }
     }
-    public void getAllLogs(Connection connection) {
+    public void getAllLogs() {
         String selectSQL = "SELECT * FROM http_log";
-        lastInteractionTime = System.currentTimeMillis();
+        int counter = 0;
+        lastProxyInteractionTime = System.currentTimeMillis();
         try (Statement stmt = connection.createStatement();
              ResultSet rs = stmt.executeQuery(selectSQL)) {
 
@@ -238,25 +217,31 @@ public class DataSender {
                         method,
                         remoteAddr,
                         url.length() > 50 ? url.substring(0, 47) + "..." : url);
+                counter++;
             }
 
             System.out.println("----------------------------------------------------------------------------------------------------------------------------------");
-
+            System.out.println("Rows in log table: " + counter);
         } catch (SQLException e) {
             logger.error("CANT LOAD LOGS FROM DATABASE: " + e.getMessage());
             e.printStackTrace();
         }
     }
-    public void getAllAggregatedLogs(Connection connection) {
-        String selectSQL = "SELECT * FROM http_log_agg";
+    public void getAllAggregatedLogs() {
+        String selectSQL = "SELECT resource_id, response_status, cache_status, remote_addr, "
+                + "total_bytes_sent, request_count "
+                + "FROM http_log_agg "
+                + "ORDER BY resource_id, response_status, cache_status, remote_addr";
+
+        int counter = 0;
 
         try (Statement stmt = connection.createStatement();
              ResultSet rs = stmt.executeQuery(selectSQL)) {
 
             System.out.println("\nhttp_log_agg:");
             System.out.println("----------------------------------------------------------------------------------------------------------------------");
-            System.out.printf("| %-12s | %-6s | %-12s | %-15s | %-15s | %-13s | %-30s |%n",
-                    "Resource ID", "Status", "Cache Status", "Remote Addr", "Total Bytes", "Request Count", "Last Refresh");
+            System.out.printf("| %-12s | %-6s | %-12s | %-15s | %-15s | %-13s |%n",
+                    "Resource ID", "Status", "Cache Status", "Remote Addr", "Total Bytes", "Request Count");
             System.out.println("----------------------------------------------------------------------------------------------------------------------");
 
             while (rs.next()) {
@@ -266,28 +251,42 @@ public class DataSender {
                 String remoteAddr = rs.getString("remote_addr");
                 long totalBytes = rs.getLong("total_bytes_sent");
                 long requestCount = rs.getLong("request_count");
-                Timestamp lastRefresh = rs.getTimestamp("last_refresh_time");
 
-                System.out.printf("| %-12d | %-6d | %-12s | %-15s | %-15d | %-13d | %-30s |%n",
+                System.out.printf("| %-12d | %-6d | %-12s | %-15s | %-15d | %-13d |%n",
                         resourceId,
                         responseStatus,
                         cacheStatus,
                         remoteAddr,
                         totalBytes,
-                        requestCount,
-                        lastRefresh);
+                        requestCount);
+                counter++;
             }
 
             System.out.println("----------------------------------------------------------------------------------------------------------------------");
-
+            System.out.println("Rows in agg table: " + counter);
         } catch (SQLException e) {
-            logger.error("Ошибка загрузки агрегированных данных: " + e.getMessage());
-            e.printStackTrace();
+            logger.error("Error loading aggregated data: " + e.getMessage());
         }
     }
 
-    public long getDuration() {
-        long diffMillis = System.currentTimeMillis() - lastInteractionTime;
+    public void optimizeTable() {
+        String dropTableSQL = "OPTIMIZE TABLE http_log_agg FINAL";
+
+        try (Statement stmt = connection.createStatement()) {
+            stmt.executeUpdate(dropTableSQL);
+            lastProxyInteractionTime = System.currentTimeMillis();
+        } catch (SQLException e) {
+            logger.error(e.getMessage());
+        }
+    }
+
+    public long getProxyDuration() {
+        long diffMillis = System.currentTimeMillis() - lastProxyInteractionTime;
         return diffMillis / 1000;
+    }
+
+    public long getOptimizeDuration(){
+         long diffMillis = System.currentTimeMillis() - lastAggLogsUpdateTime;
+         return diffMillis / 1000;
     }
 }
