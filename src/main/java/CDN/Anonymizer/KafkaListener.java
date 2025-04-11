@@ -19,7 +19,9 @@ public class KafkaListener {
     private final KafkaConsumer<String, byte[]> consumer;
     private final  DataSender dataSender;
     private List<HttpLogDTO> dtoList;
-    private long kafkaPullDelay = Long.parseLong(System.getenv("KAFKA-POLL-DELAY-MS"));
+    private final long kafkaPullDelay = Long.parseLong(System.getenv("KAFKA-POLL-DELAY-MS"));
+    private final long proxyCoolDown = Long.parseLong(System.getenv("PROXY-COOLDOWN"));
+    private final long aggregationCoolDown = Long.parseLong(System.getenv("DATA-REFRESH-COOLDOWN"));
 
     public KafkaListener(String bootstrapServers, String topic) {
         Properties props = new Properties();
@@ -75,11 +77,11 @@ public class KafkaListener {
                 logger.error("Offset commit failed: " + e.getMessage());
             }
 
-            if(dataSender.getProxyDuration() > 60 && dataSender.getOptimizeDuration() < 180){
+            if(dataSender.getProxyDuration() > proxyCoolDown && dataSender.getAggRefreshDuration() < aggregationCoolDown){
                  dtoList = dataSender.transferData(dtoList);
             }
 
-            if(dataSender.getProxyDuration() > 60 && dataSender.getOptimizeDuration() > 180){
+            if(dataSender.getProxyDuration() > proxyCoolDown && dataSender.getAggRefreshDuration() > aggregationCoolDown){
                 dataSender.refreshAggregatedTable();
             }
         }

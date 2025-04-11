@@ -113,7 +113,7 @@ public class DataSender {
         return diffMillis / 1000;
     }
 
-    public long getOptimizeDuration(){
+    public long getAggRefreshDuration(){
          long diffMillis = System.currentTimeMillis() - lastAggLogsUpdateTime;
          return diffMillis / 1000;
     }

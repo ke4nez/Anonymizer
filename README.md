@@ -1,3 +1,86 @@
+# FEEDBACK
+
+I found this task both engaging and aligned with my interests—specifically, working with data.  
+Below is a more detailed overview of the solution and the development process.
+
+## How to Run the Application
+
+To run the application, you can directly execute the `main` function in your IDE, ensuring that the environment variables are provided via the `environment.txt` file.
+> **Note:** On production, the application would typically be deployed using Docker. However, for local testing, running it directly via the IDE is sufficient.
+
+To set up a local environment, run the following command to start the necessary services with Docker: `docker-compose up -d`.
+## 🕒 Time Spent
+
+Most of the time was invested in exploring technologies that were new to me, particularly **Cap’n Proto** and **ClickHouse**.  
+The project was completed over the course of **6 days**, with approximately **4–5 hours of work each day**.
+
+Significant time was dedicated to:
+- Researching and evaluating the most optimal solution
+- Thorough testing and validation of the implementation
+
+## 🛠️ Implementation
+
+### Kafka Listener
+
+The application continuously listens to a specified Kafka topic and processes message batches at a defined time interval.  
+Incoming logs are stored temporarily in memory and then sent to a **ClickHouse** server.
+
+- **Potential Data Loss**:  
+  There is a minimal risk of data loss under normal operation. However, if the application is unable to insert data into ClickHouse for an extended period (due to proxy rate limiting or connectivity issues), and the in-memory `dtoList` buffer fills up, older log records may be dropped. The severity of this risk depends on the incoming log rate and the memory limits of the application.
+
+  This issue can be mitigated by adjusting the logic to commit Kafka offsets **only after a successful insert into ClickHouse**. This way, failed insertions will not acknowledge the batch as processed, allowing the application to retry.  
+  However, I am not aware of the exact Kafka settings in use, such as retention time and batch size configurations. Because of this, I considered the possibility that uncommitted offsets could lead to Kafka dropping messages. Therefore, I chose to commit the Kafka offsets after reading the messages, rather than after their successful insertion into the database. This ensures that the system can continue processing without the risk of Kafka discarding messages due to uncommitted offsets or retention limits.
+
+⚠️ **Data transfer is limited by a proxy**, which allows only **one request per minute**.
+
+### ClickHouse
+
+Log data is stored in two tables:
+
+- `http_log` – stores raw logs and uses the default **MergeTree** engine.
+- `http_log_agg` – stores aggregated logs and uses the **ReplacingMergeTree** engine to deduplicate rows with the same key.  
+  This ensures that only the most recent version of a record (e.g., with the highest traffic value) is retained after background merges.
+
+- **Duplicate Records**:  
+  Temporary duplicates may appear in the `http_log_agg` table due to how the `ReplacingMergeTree` engine works. These duplicates are cleaned up during background merge operations, which occur asynchronously.  
+  A drawback of using `ReplacingMergeTree` is that outdated duplicate records may persist temporarily until a background merge occurs.  
+  Due to current limitations (e.g., ClickHouse version and a proxy that restricts queries to one per minute), this is the most optimal solution for now.
+
+  In the future, this can be improved by switching to a **refreshable Materialized View**, which would eliminate the temporary presence of outdated data and provide more precise control over refresh intervals and update logic.
+
+- **Refreshing Aggregated Data**:  
+  The aggregated data in the `http_log_agg` table must be refreshed manually by the application. This is currently done by the program at fixed intervals. While this approach works, it is not the most optimal solution. In the future, this process can be improved by using a **refreshable Materialized View**, which would eliminate the need for manual refreshing. A refreshable Materialized View would ensure that aggregated data is always up to date and provide more precise control over refresh intervals and update logic.
+
+### 📊 Data Retention
+
+#### 1. **Average Size of a Single Record**
+
+##### **Table `http_log` (Raw Data):**
+Each log entry typically includes the following fields:
+- `timestamp` = 8 bytes
+- `resource_id` = 8 bytes
+- `bytes_sent` = 8 bytes
+- `request_time_milli` = 8 bytes
+- `response_status` = 2 bytes
+- `cache_status` = ~10 bytes (LowCardinality, depends on dictionary size)
+- `method` = ~10 bytes
+- `remote_addr` = ~16 bytes (for an IPv4 address as string)
+- `url` = ~60–150 bytes (typical URL length)
+
+This gives an approximate record size of: **~130–200 bytes per record**.
+
+##### **Table `http_log_agg` (Aggregated Data):**
+Aggregated log entries include:
+- `resource_id` = 8 bytes
+- `response_status` = 2 bytes
+- `cache_status` = ~10 bytes
+- `remote_addr` = ~16 bytes
+- `total_bytes_sent` = 8 bytes
+- `request_count` = 8 bytes
+
+This gives an approximate record size of: **~50–80 bytes per record**.
+
+---
 # Data Engineering Task
 
 ## Task 1 ETL (Anonymizer)
