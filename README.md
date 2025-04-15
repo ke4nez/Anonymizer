@@ -19,6 +19,7 @@ Significant time was dedicated to:
 - Thorough testing and validation of the implementation
 
 ## 🛠️ Implementation
+> **Note:** More debug and create table functions are in brench **Dev**
 
 ### Kafka Listener
 
